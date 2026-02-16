@@ -4,6 +4,12 @@ import Foundation
 import AppKit
 #endif
 
+public enum FileVisibility: String, Codable, Sendable, Hashable {
+    case tabHidden = "tab_hidden"
+    case tabVisible = "tab_visible"
+    case visible = "visible"
+}
+
 public struct AppUsage: Sendable, Hashable {
     public let bundleID: String
     public let pid: pid_t
@@ -15,6 +21,13 @@ public struct AppUsage: Sendable, Hashable {
     public let isTabDisplayingFileVisible: Bool
 
     public let debug: [DetectionStep]?
+
+    public var fileVisibility: FileVisibility {
+        if isTabDisplayingFileVisible {
+            return hasTabs ? .tabVisible : .visible
+        }
+        return .tabHidden
+    }
 
     public init(
         bundleID: String,

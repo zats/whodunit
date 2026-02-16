@@ -3,19 +3,22 @@ import Whodunit
 
 private struct OutputLine: Encodable {
     struct App: Encodable {
-        let pid: String
         let name: String
-        let bundleID: String
+        let pid: Int
+        let bundleId: String
+        let frontmost: Bool
+    }
+
+    struct File: Encodable {
+        let visibility: FileVisibility
     }
 
     let app: App
-    let isFrontmost: Bool
-    let hasTabs: Bool
-    let isFileTabVisible: Bool
+    let file: File
 }
 
 private func usage() -> Never {
-    fputs("usage: whodunit [--jsonl|--json|--csv|--tsv] <PATH>\\n", stderr)
+    fputs("usage: whodunit [--jsonl|--json|--csv|--tsv] <PATH>\n", stderr)
     exit(2)
 }
 
@@ -56,7 +59,7 @@ for arg in args {
 guard let path else { usage() }
 
 guard let resolver = FileEditingResolver(path) else {
-    fputs("invalid path\\n", stderr)
+    fputs("invalid path\n", stderr)
     exit(2)
 }
 
@@ -70,48 +73,49 @@ func escapeDelimited(_ s: String, delimiter: Character) -> String {
     return s
 }
 
+private func makeLine(_ usage: AppUsage) -> OutputLine {
+    OutputLine(
+        app: .init(
+            name: usage.name,
+            pid: Int(usage.pid),
+            bundleId: usage.bundleID,
+            frontmost: usage.isFrontmost
+        ),
+        file: .init(visibility: usage.fileVisibility)
+    )
+}
+
 switch format {
 case .jsonl:
     for app in resolver.apps {
-        let line = OutputLine(
-            app: .init(pid: String(app.pid), name: app.name, bundleID: app.bundleID),
-            isFrontmost: app.isFrontmost,
-            hasTabs: app.hasTabs,
-            isFileTabVisible: app.isTabDisplayingFileVisible
-        )
+        let line = makeLine(app)
         let data = try encoder.encode(line)
         FileHandle.standardOutput.write(data)
         FileHandle.standardOutput.write(Data([0x0a]))
     }
 case .json:
-    let lines: [OutputLine] = resolver.apps.map { app in
-        OutputLine(
-            app: .init(pid: String(app.pid), name: app.name, bundleID: app.bundleID),
-            isFrontmost: app.isFrontmost,
-            hasTabs: app.hasTabs,
-            isFileTabVisible: app.isTabDisplayingFileVisible
-        )
-    }
+    let lines = resolver.apps.map(makeLine)
     let data = try encoder.encode(lines)
     FileHandle.standardOutput.write(data)
     FileHandle.standardOutput.write(Data([0x0a]))
 case .csv, .tsv:
     let delimiter: Character = (format == .tsv) ? "\t" : ","
     let sep = String(delimiter)
-    print(["pid", "name", "bundleID", "isFrontmost", "hasTabs", "isFileTabVisible"].joined(separator: sep))
+    print(["pid", "name", "bundleId", "frontmost", "visibility"].joined(separator: sep))
     for app in resolver.apps {
+        let line = makeLine(app)
         let cols: [String] = [
-            escapeDelimited(String(app.pid), delimiter: delimiter),
-            escapeDelimited(app.name, delimiter: delimiter),
-            escapeDelimited(app.bundleID, delimiter: delimiter),
-            String(app.isFrontmost),
-            String(app.hasTabs),
-            String(app.isTabDisplayingFileVisible),
+            String(line.app.pid),
+            escapeDelimited(line.app.name, delimiter: delimiter),
+            escapeDelimited(line.app.bundleId, delimiter: delimiter),
+            String(line.app.frontmost),
+            line.file.visibility.rawValue,
         ]
         print(cols.joined(separator: sep))
     }
 case .text:
     for app in resolver.apps {
-        print("\(app.name) pid=\(app.pid) frontmost=\(app.isFrontmost) hasTabs=\(app.hasTabs) visible=\(app.isTabDisplayingFileVisible)")
+        let line = makeLine(app)
+        print("\(line.app.name) pid=\(line.app.pid) bundleId=\(line.app.bundleId) frontmost=\(line.app.frontmost) visibility=\(line.file.visibility.rawValue)")
     }
 }
