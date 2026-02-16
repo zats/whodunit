@@ -12,12 +12,11 @@ public enum Whodunit {
     public static func reveal(_ path: String, options: DetectionOptions = .default) -> Bool {
         guard let resolver = FileEditingResolver(path, options: options) else { return false }
         guard resolver.apps.count == 1, let app = resolver.apps.first else { return false }
-        return reveal(path: resolver.target, in: app)
+        return reveal(path: resolver.target, in: app, options: options)
     }
 
     @discardableResult
-    public static func reveal(path: URL, in app: AppUsage) -> Bool {
-        Revealer.reveal(target: path, in: app)
+    public static func reveal(path: URL, in app: AppUsage, options: DetectionOptions = .default) -> Bool {
+        Revealer.reveal(target: path, in: app, registry: options.registry)
     }
 }
-

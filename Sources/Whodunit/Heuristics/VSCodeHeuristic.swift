@@ -11,6 +11,9 @@ enum VSCodeHeuristic {
                 priority: 40,
                 run: { app, target in
                     evaluate(app: app, target: target)
+                },
+                reveal: { usage, target in
+                    Revealer.revealVSCodeLike(target: target, in: usage)
                 }
             ),
             .init(
@@ -19,6 +22,9 @@ enum VSCodeHeuristic {
                 priority: 40,
                 run: { app, target in
                     evaluate(app: app, target: target)
+                },
+                reveal: { usage, target in
+                    Revealer.revealVSCodeLike(target: target, in: usage)
                 }
             ),
             .init(
@@ -27,6 +33,9 @@ enum VSCodeHeuristic {
                 priority: 40,
                 run: { app, target in
                     evaluate(app: app, target: target)
+                },
+                reveal: { usage, target in
+                    Revealer.revealVSCodeLike(target: target, in: usage)
                 }
             ),
         ]

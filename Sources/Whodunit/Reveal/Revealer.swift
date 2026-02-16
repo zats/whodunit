@@ -4,27 +4,20 @@ import AppKit
 import ApplicationServices
 
 enum Revealer {
-    private static let ghosttyBundleID = "com.mitchellh.ghostty"
-    private static let vscodeOSSBundleID = "com.visualstudio.code.oss"
-    private static let cursorBundleID = "com.todesktop.230313mzl4w4u92"
-
     @discardableResult
-    static func reveal(target: URL, in usage: AppUsage) -> Bool {
+    static func reveal(target: URL, in usage: AppUsage, registry: HeuristicRegistry = .default) -> Bool {
         guard Accessibility.isTrusted() else { return false }
-        guard let running = NSRunningApplication(processIdentifier: usage.pid) else { return false }
         if usage.isFrontmost && usage.isTabDisplayingFileVisible { return true }
 
-        let targetPath = PathNormalizer.normalizeFileURL(target).path
-        let targetName = (targetPath as NSString).lastPathComponent
-
-        guard let match = bestMatch(
-            bundleID: usage.bundleID,
-            pid: usage.pid,
-            targetPath: targetPath,
-            targetName: targetName
-        ) else { return false }
-
-        return reveal(match: match, app: running)
+        let normalizedTarget = PathNormalizer.normalizeFileURL(target)
+        let entries = registry.applicable(bundleID: usage.bundleID)
+        for entry in entries {
+            guard let reveal = entry.reveal else { continue }
+            if reveal(usage, normalizedTarget) {
+                return true
+            }
+        }
+        return false
     }
 
     private struct WindowMatch {
@@ -33,27 +26,37 @@ enum Revealer {
         let score: Int
     }
 
-    private static func bestMatch(
-        bundleID: String,
-        pid: pid_t,
-        targetPath: String,
-        targetName: String
-    ) -> WindowMatch? {
-        if bundleID == ghosttyBundleID {
-            return bestGhosttyMatch(pid: pid, targetPath: targetPath)
+    @discardableResult
+    static func revealStandard(target: URL, in usage: AppUsage) -> Bool {
+        revealWithBestMatch(target: target, usage: usage) { pid, targetPath, targetName in
+            bestStandardMatch(pid: pid, targetPath: targetPath, targetName: targetName)
         }
-
-        if isVSCodeFamily(bundleID) {
-            return bestVSCodeLikeMatch(pid: pid, targetPath: targetPath, targetName: targetName)
-        }
-
-        return bestStandardMatch(pid: pid, targetPath: targetPath, targetName: targetName)
     }
 
-    private static func isVSCodeFamily(_ bundleID: String) -> Bool {
-        bundleID.hasPrefix("com.microsoft.VSCode")
-            || bundleID == vscodeOSSBundleID
-            || bundleID == cursorBundleID
+    @discardableResult
+    static func revealVSCodeLike(target: URL, in usage: AppUsage) -> Bool {
+        revealWithBestMatch(target: target, usage: usage) { pid, targetPath, targetName in
+            bestVSCodeLikeMatch(pid: pid, targetPath: targetPath, targetName: targetName)
+        }
+    }
+
+    @discardableResult
+    static func revealGhostty(target: URL, in usage: AppUsage) -> Bool {
+        revealWithBestMatch(target: target, usage: usage) { pid, targetPath, _ in
+            bestGhosttyMatch(pid: pid, targetPath: targetPath)
+        }
+    }
+
+    private static func revealWithBestMatch(
+        target: URL,
+        usage: AppUsage,
+        matcher: (_ pid: pid_t, _ targetPath: String, _ targetName: String) -> WindowMatch?
+    ) -> Bool {
+        guard let running = NSRunningApplication(processIdentifier: usage.pid) else { return false }
+        let targetPath = PathNormalizer.normalizeFileURL(target).path
+        let targetName = (targetPath as NSString).lastPathComponent
+        guard let match = matcher(usage.pid, targetPath, targetName) else { return false }
+        return reveal(match: match, app: running)
     }
 
     private static func bestStandardMatch(pid: pid_t, targetPath: String, targetName: String) -> WindowMatch? {

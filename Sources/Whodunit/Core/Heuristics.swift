@@ -40,6 +40,7 @@ public struct HeuristicRegistry: Sendable {
         let match: AppMatchRule
         let priority: Int
         let run: @Sendable (_ app: AppDescriptor, _ target: URL) -> HeuristicResult?
+        let reveal: (@Sendable (_ usage: AppUsage, _ target: URL) -> Bool)?
     }
 
     public struct HeuristicResult: Sendable {
@@ -75,14 +76,19 @@ public struct HeuristicRegistry: Sendable {
         name: String,
         match: AppMatchRule,
         priority: Int = 0,
-        run: @escaping @Sendable (_ app: AppDescriptor, _ target: URL) -> HeuristicResult?
+        run: @escaping @Sendable (_ app: AppDescriptor, _ target: URL) -> HeuristicResult?,
+        reveal: (@Sendable (_ usage: AppUsage, _ target: URL) -> Bool)? = nil
     ) {
-        entries.append(Entry(name: name, match: match, priority: priority, run: run))
+        entries.append(Entry(name: name, match: match, priority: priority, run: run, reveal: reveal))
     }
 
     func applicable(to app: AppDescriptor) -> [Entry] {
+        applicable(bundleID: app.bundleID)
+    }
+
+    func applicable(bundleID: String) -> [Entry] {
         entries
-            .filter { $0.match.matches(bundleID: app.bundleID) }
+            .filter { $0.match.matches(bundleID: bundleID) }
             .sorted { lhs, rhs in
                 if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
                 if lhs.match.specificity != rhs.match.specificity { return lhs.match.specificity > rhs.match.specificity }
@@ -90,4 +96,3 @@ public struct HeuristicRegistry: Sendable {
             }
     }
 }
-

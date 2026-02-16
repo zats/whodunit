@@ -10,6 +10,9 @@ enum StandardMacOSTabHeuristic {
             priority: -100, // ultimate fallback
             run: { app, target in
                 evaluate(app: app, target: target)
+            },
+            reveal: { usage, target in
+                Revealer.revealStandard(target: target, in: usage)
             }
         )
     }
@@ -110,4 +113,3 @@ enum StandardMacOSTabHeuristic {
         }
     }
 }
-

@@ -12,6 +12,9 @@ enum GhosttyHeuristic {
             priority: 50,
             run: { app, target in
                 evaluate(app: app, target: target)
+            },
+            reveal: { usage, target in
+                Revealer.revealGhostty(target: target, in: usage)
             }
         )
     }
