@@ -18,7 +18,7 @@ private struct OutputLine: Encodable {
 }
 
 private func usage() -> Never {
-    fputs("usage: whodunit [--jsonl|--json|--csv|--tsv] <PATH>\n", stderr)
+    fputs("usage: whodunit [--jsonl|--json|--csv|--tsv] [-R|--reveal] <PATH>\n", stderr)
     exit(2)
 }
 
@@ -33,6 +33,7 @@ enum OutputFormat {
 let args = Array(CommandLine.arguments.dropFirst())
 var format: OutputFormat = .text
 var path: String?
+var reveal = false
 
 for arg in args {
     switch arg {
@@ -46,6 +47,8 @@ for arg in args {
         format = .tsv
     case "--help", "-h":
         usage()
+    case "-R", "--reveal":
+        reveal = true
     default:
         if arg.hasPrefix("-") { usage() }
         if path == nil {
@@ -59,8 +62,20 @@ for arg in args {
 guard let path else { usage() }
 
 guard let resolver = FileEditingResolver(path) else {
-    fputs("invalid path\n", stderr)
+    fputs("invalid path: \(path)\n", stderr)
     exit(2)
+}
+
+if reveal {
+    guard resolver.apps.count == 1, let app = resolver.apps.first else {
+        fputs("file is not detected as open: \(resolver.target.path)\n", stderr)
+        exit(1)
+    }
+
+    guard Whodunit.reveal(path: resolver.target, in: app) else {
+        fputs("file is not detected as open: \(resolver.target.path)\n", stderr)
+        exit(1)
+    }
 }
 
 let encoder = JSONEncoder()

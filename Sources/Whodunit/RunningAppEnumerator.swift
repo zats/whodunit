@@ -1,6 +1,5 @@
 import Foundation
 
-#if os(macOS)
 import AppKit
 
 public struct AppDescriptor: Sendable, Hashable {
@@ -34,4 +33,3 @@ enum FrontmostAppResolver {
     }
 }
 
-#endif

@@ -1,6 +1,5 @@
 import Foundation
 
-#if os(macOS)
 import ApplicationServices
 
 enum StandardMacOSTabHeuristic {
@@ -112,4 +111,3 @@ enum StandardMacOSTabHeuristic {
     }
 }
 
-#endif

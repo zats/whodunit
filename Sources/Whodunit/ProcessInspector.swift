@@ -1,6 +1,5 @@
 import Foundation
 
-#if os(macOS)
 import Darwin
 
 enum ProcessInspector {
@@ -56,18 +55,31 @@ enum ProcessInspector {
 
     static func processHasOpenFile(pid: pid_t, path: String) -> Bool {
         let normalized = (path as NSString).standardizingPath
-        return withFileDescriptors(pid: pid) { fd in
-            guard fd.proc_fdtype == UInt32(PROX_FDTYPE_VNODE) else { return false }
-            var vnodeInfo = vnode_fdinfowithpath()
-            let size = Int32(MemoryLayout.size(ofValue: vnodeInfo))
-            let ret = proc_pidfdinfo(pid, fd.proc_fd, PROC_PIDFDVNODEPATHINFO, &vnodeInfo, size)
-            guard ret == size else { return false }
-            guard let p = cString(vnodeInfo.pvip.vip_path) else { return false }
-            return (p as NSString).standardizingPath == normalized
-        }
+        return firstMatchingFD(pid: pid) { fd in
+            guard fd.proc_fdtype == UInt32(PROX_FDTYPE_VNODE) else { return nil }
+            guard let p = vnodePath(pid: pid, fd: fd.proc_fd) else { return nil }
+            return (p as NSString).standardizingPath == normalized ? true : nil
+        } ?? false
     }
 
-    private static func withFileDescriptors(pid: pid_t, _ body: (proc_fdinfo) -> Bool) -> Bool {
+    static func processTTY(pid: pid_t) -> String? {
+        if let tty: String = firstMatchingFD(pid: pid, { fd in
+            guard fd.proc_fd == 0 else { return nil }
+            guard fd.proc_fdtype == UInt32(PROX_FDTYPE_VNODE) else { return nil }
+            guard let path = vnodePath(pid: pid, fd: fd.proc_fd) else { return nil }
+            return isTTYPath(path) ? path : nil
+        }) {
+            return tty
+        }
+
+        return firstMatchingFD(pid: pid, { fd in
+            guard fd.proc_fdtype == UInt32(PROX_FDTYPE_VNODE) else { return nil }
+            guard let path = vnodePath(pid: pid, fd: fd.proc_fd) else { return nil }
+            return isTTYPath(path) ? path : nil
+        }) as String?
+    }
+
+    private static func firstMatchingFD<T>(pid: pid_t, _ body: (proc_fdinfo) -> T?) -> T? {
         var capacityBytes = 8 * 1024
         while capacityBytes <= 1_048_576 {
             var buffer = [UInt8](repeating: 0, count: capacityBytes)
@@ -75,24 +87,36 @@ enum ProcessInspector {
                 guard let base = raw.baseAddress else { return -1 }
                 return proc_pidinfo(pid, PROC_PIDLISTFDS, 0, base, Int32(capacityBytes))
             }
-            if ret <= 0 { return false }
+            if ret <= 0 { return nil }
 
             let count = Int(ret) / MemoryLayout<proc_fdinfo>.stride
-            if count == 0 { return false }
+            if count == 0 { return nil }
 
-            let found = buffer.withUnsafeBytes { raw -> Bool in
+            let found = buffer.withUnsafeBytes { raw -> T? in
                 let base = raw.baseAddress!.assumingMemoryBound(to: proc_fdinfo.self)
                 for i in 0..<count {
-                    if body(base[i]) { return true }
+                    if let value = body(base[i]) { return value }
                 }
-                return false
+                return nil
             }
-            if found { return true }
-            if Int(ret) < capacityBytes { return false }
+            if let found { return found }
+            if Int(ret) < capacityBytes { return nil }
             capacityBytes *= 2
         }
 
-        return false
+        return nil
+    }
+
+    private static func vnodePath(pid: pid_t, fd: Int32) -> String? {
+        var vnodeInfo = vnode_fdinfowithpath()
+        let size = Int32(MemoryLayout.size(ofValue: vnodeInfo))
+        let ret = proc_pidfdinfo(pid, fd, PROC_PIDFDVNODEPATHINFO, &vnodeInfo, size)
+        guard ret == size else { return nil }
+        return cString(vnodeInfo.pvip.vip_path)
+    }
+
+    private static func isTTYPath(_ path: String) -> Bool {
+        path.hasPrefix("/dev/tty")
     }
 
     private static func cString<T>(_ tuple: T) -> String? {
@@ -105,5 +129,3 @@ enum ProcessInspector {
         }
     }
 }
-
-#endif

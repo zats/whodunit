@@ -1,6 +1,5 @@
 import Foundation
 
-#if os(macOS)
 import ApplicationServices
 
 enum GhosttyHeuristic {
@@ -35,6 +34,7 @@ enum GhosttyHeuristic {
             (rawWindows as? [AXUIElement])
             ?? (rawWindows as? [AnyObject])?.map { $0 as! AXUIElement }
             ?? []
+        var debug: [String] = []
 
         var tabModels: [TabModel] = []
         tabModels.reserveCapacity(8)
@@ -55,14 +55,17 @@ enum GhosttyHeuristic {
                 matchingPIDs.append(pid)
             }
         }
+        let matchingTTYs = Set(matchingPIDs.compactMap { ProcessInspector.processTTY(pid: $0) })
 
         guard !matchingPIDs.isEmpty else {
             // We didn't find the file open in Ghostty's process tree.
+            debug.append("descendants=\(descendantPIDs.count)")
+            debug.append("match=0")
             return HeuristicRegistry.HeuristicResult(
                 displaysFile: false,
                 visibleFile: false,
                 hasTabs: hasTabs,
-                debug: ["descendants=\(descendantPIDs.count)", "match=0"]
+                debug: debug
             )
         }
 
@@ -88,14 +91,31 @@ enum GhosttyHeuristic {
             }
             if let best {
                 visible = best.selected
+            } else {
+                // CLI runs from a concrete terminal tab/TTY. If the file holder PID shares that TTY,
+                // the file is in the currently visible tab for this invocation context.
+                if let currentTTY = ProcessInspector.processTTY(pid: getpid()) {
+                    let ttyName = (currentTTY as NSString).lastPathComponent
+                    if matchingTTYs.contains(currentTTY) {
+                        visible = true
+                        debug.append("visibility=tty-match:\(ttyName)")
+                    } else {
+                        debug.append("visibility=tty-miss:\(ttyName)")
+                    }
+                } else {
+                    debug.append("visibility=unmapped")
+                }
             }
         }
+
+        debug.append("descendants=\(descendantPIDs.count)")
+        debug.append("match=\(matchingPIDs.count)")
 
         return HeuristicRegistry.HeuristicResult(
             displaysFile: true,
             visibleFile: visible,
             hasTabs: hasTabs,
-            debug: ["descendants=\(descendantPIDs.count)", "match=\(matchingPIDs.count)"]
+            debug: debug
         )
     }
 
@@ -170,6 +190,3 @@ enum GhosttyHeuristic {
         }
     }
 }
-
-#endif
-

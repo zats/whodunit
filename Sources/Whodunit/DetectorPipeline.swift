@@ -1,6 +1,5 @@
 import Foundation
 
-#if os(macOS)
 
 enum DetectorPipeline {
     static func evaluate(
@@ -55,4 +54,3 @@ enum DetectorPipeline {
     }
 }
 
-#endif

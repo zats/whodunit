@@ -1,11 +1,8 @@
 import Foundation
 
-#if os(macOS)
 import ApplicationServices
 
 enum VSCodeHeuristic {
-    private static let textFileEditorMementoKey = "memento/workbench.editors.files.textFileEditor"
-
     static func entries() -> [HeuristicRegistry.Entry] {
         [
             .init(
@@ -61,9 +58,16 @@ enum VSCodeHeuristic {
         for window in windows {
             let windowDocPath = visibleDocumentPath(window: window)
             let visibleInThisWindow = (windowDocPath == targetPath)
+            let tabKeys = fileishTabKeys(window: window, maxNodes: 160_000)
+            let targetTabKey = normalizeTabKey(targetBasename)
+            let hasTargetTabKey = tabKeys.contains(targetTabKey)
             var containsTarget = visibleInThisWindow
 
             if !containsTarget {
+                // Don't treat workspace/file tree rows as "open in editor":
+                // only windows whose editor tabs include the target basename qualify.
+                guard hasTargetTabKey else { continue }
+
                 containsTarget = searchForTargetPath(
                     in: window,
                     targetPath: targetPath,
@@ -76,17 +80,7 @@ enum VSCodeHeuristic {
 
             displaysFile = true
             if visibleInThisWindow { visibleFile = true }
-            if hasAtLeastTwoFileishTabs(window: window, maxNodes: 120_000) { hasTabs = true }
-        }
-
-        // VS Code does not reliably expose full paths for background tabs via Accessibility.
-        // Use its workspaceStorage state DB as a fallback for "open somewhere" detection.
-        if !displaysFile {
-            let state = stateFromWorkspaceStorage(bundleID: app.bundleID, targetPath: targetPath)
-            if state.open {
-                displaysFile = true
-                if state.openEditorsCount >= 2 { hasTabs = true }
-            }
+            if tabKeys.count >= 2 { hasTabs = true }
         }
 
         if visibleFile { displaysFile = true }
@@ -106,8 +100,9 @@ enum VSCodeHeuristic {
         return nil
     }
 
-    private static func hasAtLeastTwoFileishTabs(window: AXUIElement, maxNodes: Int) -> Bool {
-        var count = 0
+    private static func fileishTabKeys(window: AXUIElement, maxNodes: Int) -> Set<String> {
+        var keys = Set<String>()
+        keys.reserveCapacity(8)
 
         forEachDescendantUntil(of: window, maxNodes: maxNodes) { el in
             guard Accessibility.role(of: el) == kAXRadioButtonRole else { return true }
@@ -121,12 +116,25 @@ enum VSCodeHeuristic {
                 ])
 
             guard let label, isFileishTabLabel(label) else { return true }
-
-            count += 1
-            return count < 2
+            keys.insert(normalizeTabKey(label))
+            return true
         }
 
-        return count >= 2
+        return keys
+    }
+
+    private static func normalizeTabKey(_ label: String) -> String {
+        var s = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("Preview ") {
+            s = String(s.dropFirst("Preview ".count))
+        }
+        if let bullet = s.firstIndex(of: "•") {
+            s = String(s[..<bullet])
+        }
+        if let comma = s.firstIndex(of: ",") {
+            s = String(s[..<comma])
+        }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private static func searchForTargetPath(
@@ -223,95 +231,6 @@ enum VSCodeHeuristic {
         return out
     }
 
-    private struct WorkspaceState: Sendable {
-        let open: Bool
-        let openEditorsCount: Int
-    }
-
-    private static func stateFromWorkspaceStorage(bundleID: String, targetPath: String) -> WorkspaceState {
-        guard let workspaceStorage = workspaceStorageDirectory(bundleID: bundleID) else {
-            return .init(open: false, openEditorsCount: 0)
-        }
-
-        let dbs = mostRecentlyModifiedStateDBs(in: workspaceStorage, maxCount: 80)
-        guard !dbs.isEmpty else { return .init(open: false, openEditorsCount: 0) }
-
-        for dbURL in dbs {
-            guard let urls = openTextEditorFileURLs(fromStateDB: dbURL) else { continue }
-            if urls.contains(where: { $0.path == targetPath }) {
-                return .init(open: true, openEditorsCount: urls.count)
-            }
-        }
-
-        return .init(open: false, openEditorsCount: 0)
-    }
-
-    private static func workspaceStorageDirectory(bundleID: String) -> URL? {
-        let support = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library")
-            .appendingPathComponent("Application Support")
-
-        let roots: [String]
-        if bundleID.hasPrefix("com.microsoft.VSCode") {
-            roots = ["Code", "Code - Insiders", "Code - Exploration"]
-        } else if bundleID == "com.visualstudio.code.oss" {
-            roots = ["Code - OSS"]
-        } else if bundleID == "com.todesktop.230313mzl4w4u92" {
-            roots = ["Cursor"]
-        } else {
-            roots = ["Code"]
-        }
-
-        for r in roots {
-            let dir = support
-                .appendingPathComponent(r)
-                .appendingPathComponent("User")
-                .appendingPathComponent("workspaceStorage")
-            if FileManager.default.fileExists(atPath: dir.path) { return dir }
-        }
-
-        return nil
-    }
-
-    private static func mostRecentlyModifiedStateDBs(in dir: URL, maxCount: Int) -> [URL] {
-        let fm = FileManager.default
-        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .isRegularFileKey]
-
-        var out: [(URL, Date)] = []
-        out.reserveCapacity(32)
-
-        let e = fm.enumerator(at: dir, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles])
-        while let item = e?.nextObject() as? URL {
-            guard item.lastPathComponent == "state.vscdb" else { continue }
-            guard let values = try? item.resourceValues(forKeys: keys),
-                  values.isRegularFile == true,
-                  let m = values.contentModificationDate else { continue }
-            out.append((item, m))
-        }
-
-        out.sort(by: { $0.1 > $1.1 })
-        return out.prefix(maxCount).map(\.0)
-    }
-
-    private static func openTextEditorFileURLs(fromStateDB dbURL: URL) -> [URL]? {
-        guard let db = SQLiteKVStore.DB(url: dbURL) else { return nil }
-        guard let raw = db.valueData(forKey: textFileEditorMementoKey), !raw.isEmpty else { return nil }
-
-        guard let json = try? JSONSerialization.jsonObject(with: raw) as? [String: Any] else { return nil }
-        guard let entries = json["textEditorViewState"] as? [Any] else { return nil }
-
-        var urls: [URL] = []
-        urls.reserveCapacity(min(entries.count, 32))
-
-        for entry in entries {
-            guard let pair = entry as? [Any], let first = pair.first as? String else { continue }
-            guard let u = URL(string: first), u.isFileURL else { continue }
-            urls.append(PathNormalizer.normalizeFileURL(u))
-        }
-
-        return urls.isEmpty ? nil : urls
-    }
-
     private static func isFileishTabLabel(_ label: String) -> Bool {
         let s = label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard s.count >= 3, s.count <= 220 else { return false }
@@ -353,5 +272,3 @@ enum VSCodeHeuristic {
         }
     }
 }
-
-#endif

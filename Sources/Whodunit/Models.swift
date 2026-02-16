@@ -1,8 +1,6 @@
 import Foundation
 
-#if os(macOS)
 import AppKit
-#endif
 
 public enum FileVisibility: String, Codable, Sendable, Hashable {
     case tabHidden = "tab_hidden"

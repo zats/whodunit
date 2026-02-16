@@ -1,6 +1,5 @@
 import Foundation
 
-#if os(macOS)
 
 public enum AppMatchRule: Sendable, Hashable {
     case any
@@ -92,4 +91,3 @@ public struct HeuristicRegistry: Sendable {
     }
 }
 
-#endif

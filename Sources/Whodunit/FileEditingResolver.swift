@@ -1,8 +1,6 @@
 import Foundation
 
-#if os(macOS)
 import AppKit
-#endif
 
 public struct FileEditingResolver: Sendable {
     public let target: URL
@@ -12,7 +10,6 @@ public struct FileEditingResolver: Sendable {
         guard let targetURL = PathNormalizer.fileURL(from: path) else { return nil }
         self.target = targetURL
 
-        #if os(macOS)
         let allApps = RunningAppEnumerator.enumerate()
         let frontmostPID = FrontmostAppResolver.frontmostPID()
 
@@ -32,9 +29,5 @@ public struct FileEditingResolver: Sendable {
         }
 
         self.apps = results
-        #else
-        self.apps = []
-        #endif
     }
 }
-

@@ -1,6 +1,5 @@
 import Foundation
 
-#if os(macOS)
 import ApplicationServices
 
 enum Accessibility {
@@ -51,6 +50,15 @@ enum Accessibility {
         attributeValue(element, attribute) as? String
     }
 
+    static func performAction(_ element: AXUIElement, _ action: String) -> Bool {
+        AXUIElementPerformAction(element, action as CFString) == .success
+    }
+
+    static func setBoolValue(_ element: AXUIElement, _ attribute: String, _ value: Bool) -> Bool {
+        let cf = value as CFBoolean
+        return AXUIElementSetAttributeValue(element, attribute as CFString, cf) == .success
+    }
+
     static func findFirstDescendant(
         of root: AXUIElement,
         maxNodes: Int = 5_000,
@@ -74,4 +82,3 @@ enum Accessibility {
     }
 }
 
-#endif
