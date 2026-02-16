@@ -65,9 +65,10 @@ public struct HeuristicRegistry: Sendable {
 
     public static var `default`: HeuristicRegistry {
         var reg = HeuristicRegistry()
-        reg.entries = [
-            StandardMacOSTabHeuristic.entry(),
-        ]
+        reg.entries =
+            [GhosttyHeuristic.entry()]
+            + VSCodeHeuristic.entries()
+            + [StandardMacOSTabHeuristic.entry()]
         return reg
     }
 

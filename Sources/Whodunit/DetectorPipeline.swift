@@ -10,7 +10,18 @@ enum DetectorPipeline {
         options: DetectionOptions
     ) -> AppUsage {
         let normalizedTarget = PathNormalizer.normalizeFileURL(target)
-        let candidates = options.registry.applicable(to: app)
+        let allCandidates = options.registry.applicable(to: app)
+
+        // If we have any app-specific heuristics, skip negative-priority `.any` fallbacks.
+        // This prevents generic tab-title fallbacks from producing false positives in apps
+        // like VS Code (where multiple unrelated files can share the same basename).
+        let hasSpecific = allCandidates.contains(where: { $0.match.specificity > 0 })
+        let candidates: [HeuristicRegistry.Entry]
+        if hasSpecific {
+            candidates = allCandidates.filter { $0.match.specificity > 0 || $0.priority >= 0 }
+        } else {
+            candidates = allCandidates
+        }
 
         var displays = false
         var visible = false
