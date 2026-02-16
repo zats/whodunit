@@ -14,9 +14,16 @@ enum GhosttyHeuristic {
                 evaluate(app: app, target: target)
             },
             reveal: { usage, target in
-                Revealer.revealGhostty(target: target, in: usage)
+                reveal(target: target, in: usage)
             }
         )
+    }
+
+    @discardableResult
+    static func reveal(target: URL, in usage: AppUsage) -> Bool {
+        let targetPath = PathNormalizer.normalizeFileURL(target).path
+        guard let match = bestRevealMatch(pid: usage.pid, targetPath: targetPath) else { return false }
+        return Revealer.reveal(match: match, pid: usage.pid)
     }
 
     static func evaluate(app: AppDescriptor, target: URL) -> HeuristicRegistry.HeuristicResult? {
@@ -127,6 +134,75 @@ enum GhosttyHeuristic {
         let selected: Bool
     }
 
+    private struct RevealTab {
+        let window: AXUIElement
+        let element: AXUIElement
+        let title: String
+        let selected: Bool
+    }
+
+    private static func bestRevealMatch(pid: pid_t, targetPath: String) -> Revealer.WindowMatch? {
+        let appWindows = Revealer.windows(pid: pid)
+        guard !appWindows.isEmpty else { return nil }
+
+        var tabs: [RevealTab] = []
+        tabs.reserveCapacity(8)
+        for window in appWindows {
+            tabs.append(contentsOf: extractRevealTabs(window: window))
+        }
+
+        let descendantPIDs = ProcessInspector.descendantPIDs(of: pid)
+        var matchingPIDs: [pid_t] = []
+        matchingPIDs.reserveCapacity(4)
+        for childPID in descendantPIDs {
+            if ProcessInspector.processHasOpenFile(pid: childPID, path: targetPath) {
+                matchingPIDs.append(childPID)
+            }
+        }
+        let matchingTTYs = Set(matchingPIDs.compactMap { ProcessInspector.processTTY(pid: $0) })
+
+        guard !matchingPIDs.isEmpty else { return nil }
+
+        if tabs.isEmpty {
+            return Revealer.WindowMatch(window: appWindows[0], tab: nil, score: 10)
+        }
+
+        var best: (score: Int, tab: RevealTab)?
+        for matchingPID in matchingPIDs {
+            guard let cwd = ProcessInspector.processCWD(pid: matchingPID) else { continue }
+            let matcher = TitleMatcher(cwd: cwd)
+            for tab in tabs {
+                let score = matcher.score(against: tab.title)
+                guard score > 0 else { continue }
+                if best == nil || score > best!.score {
+                    best = (score: score, tab: tab)
+                }
+            }
+        }
+
+        if let best {
+            return Revealer.WindowMatch(window: best.tab.window, tab: best.tab.element, score: 200 + best.score)
+        }
+
+        if let tab = bestRevealTTYFallbackTab(tabs: tabs, matchingTTYs: matchingTTYs) {
+            return Revealer.WindowMatch(window: tab.window, tab: tab.element, score: 150)
+        }
+
+        return nil
+    }
+
+    private static func bestRevealTTYFallbackTab(tabs: [RevealTab], matchingTTYs: Set<String>) -> RevealTab? {
+        guard !tabs.isEmpty else { return nil }
+        guard !matchingTTYs.isEmpty else { return nil }
+        guard let currentTTY = ProcessInspector.processTTY(pid: getpid()) else { return nil }
+
+        if matchingTTYs.contains(currentTTY) {
+            return tabs.first(where: { $0.selected })
+        }
+
+        return tabs.first(where: { !$0.selected })
+    }
+
     private static func extractTabs(from window: AXUIElement) -> [TabModel] {
         guard let tabGroup = Accessibility.findFirstDescendant(of: window, where: { el in
             Accessibility.role(of: el) == kAXTabGroupRole
@@ -140,6 +216,22 @@ enum GhosttyHeuristic {
             guard let title = Accessibility.title(of: r) else { return nil }
             let selected = Accessibility.boolValue(r, kAXValueAttribute) ?? false
             return TabModel(title: title, selected: selected)
+        }
+    }
+
+    private static func extractRevealTabs(window: AXUIElement) -> [RevealTab] {
+        guard let tabGroup = Accessibility.findFirstDescendant(of: window, where: { el in
+            Accessibility.role(of: el) == kAXTabGroupRole
+        }) else { return [] }
+
+        let radios = Accessibility.children(of: tabGroup).filter { child in
+            Accessibility.role(of: child) == kAXRadioButtonRole
+        }
+
+        return radios.compactMap { radio in
+            guard let title = Accessibility.title(of: radio) else { return nil }
+            let selected = Accessibility.boolValue(radio, kAXValueAttribute) ?? false
+            return RevealTab(window: window, element: radio, title: title, selected: selected)
         }
     }
 

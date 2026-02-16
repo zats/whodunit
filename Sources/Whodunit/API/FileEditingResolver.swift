@@ -23,7 +23,7 @@ public struct FileEditingResolver: Sendable {
                 isFrontmost: running.pid == frontmostPID,
                 options: options
             )
-            if usage.displaysFile || usage.isTabDisplayingFileVisible {
+            if usage.displaysFile {
                 results.append(usage)
             }
         }

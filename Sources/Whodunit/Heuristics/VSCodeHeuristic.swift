@@ -13,7 +13,7 @@ enum VSCodeHeuristic {
                     evaluate(app: app, target: target)
                 },
                 reveal: { usage, target in
-                    Revealer.revealVSCodeLike(target: target, in: usage)
+                    reveal(target: target, in: usage)
                 }
             ),
             .init(
@@ -24,7 +24,7 @@ enum VSCodeHeuristic {
                     evaluate(app: app, target: target)
                 },
                 reveal: { usage, target in
-                    Revealer.revealVSCodeLike(target: target, in: usage)
+                    reveal(target: target, in: usage)
                 }
             ),
             .init(
@@ -35,10 +35,18 @@ enum VSCodeHeuristic {
                     evaluate(app: app, target: target)
                 },
                 reveal: { usage, target in
-                    Revealer.revealVSCodeLike(target: target, in: usage)
+                    reveal(target: target, in: usage)
                 }
             ),
         ]
+    }
+
+    @discardableResult
+    static func reveal(target: URL, in usage: AppUsage) -> Bool {
+        let targetPath = PathNormalizer.normalizeFileURL(target).path
+        let targetName = (targetPath as NSString).lastPathComponent
+        guard let match = bestRevealMatch(pid: usage.pid, targetPath: targetPath, targetName: targetName) else { return false }
+        return Revealer.reveal(match: match, pid: usage.pid)
     }
 
     static func evaluate(app: AppDescriptor, target: URL) -> HeuristicRegistry.HeuristicResult? {
@@ -107,6 +115,88 @@ enum VSCodeHeuristic {
             return PathNormalizer.normalizeFileURL(url).path
         }
         return nil
+    }
+
+    private struct RevealTabScore {
+        let element: AXUIElement
+        let score: Int
+    }
+
+    private static func bestRevealMatch(pid: pid_t, targetPath: String, targetName: String) -> Revealer.WindowMatch? {
+        var best: Revealer.WindowMatch?
+
+        for window in Revealer.windows(pid: pid) {
+            var score = 0
+            var tab: AXUIElement?
+
+            if Revealer.visibleDocumentPath(window: window) == targetPath {
+                score += 130
+            }
+
+            if let tabMatch = findRevealTab(in: window, targetName: targetName) {
+                tab = tabMatch.element
+                score += tabMatch.score
+                if Accessibility.boolValue(tabMatch.element, kAXValueAttribute) == true {
+                    score += 10
+                }
+            }
+
+            if Revealer.windowContainsPath(window, targetPath: targetPath, targetBasename: targetName) {
+                score += 90
+            }
+
+            guard score > 0 else { continue }
+            let candidate = Revealer.WindowMatch(window: window, tab: tab, score: score)
+            if best == nil || candidate.score > best!.score { best = candidate }
+        }
+
+        return best
+    }
+
+    private static func findRevealTab(in window: AXUIElement, targetName: String) -> RevealTabScore? {
+        var best: RevealTabScore?
+
+        Revealer.forEachDescendantUntil(of: window, maxNodes: 180_000) { el in
+            guard Accessibility.role(of: el) == kAXRadioButtonRole else { return true }
+            guard Accessibility.stringValue(el, kAXSubroleAttribute) == "AXTabButton" else { return true }
+
+            let label = Revealer.firstNonEmpty([
+                Accessibility.stringValue(el, kAXDescriptionAttribute),
+                Accessibility.stringValue(el, kAXTitleAttribute),
+                Accessibility.stringValue(el, kAXHelpAttribute),
+            ]) ?? ""
+
+            let normalized = normalizeRevealTabTitle(label)
+            let score = scoreForRevealTabLabel(normalized, targetName: targetName)
+            guard score > 0 else { return true }
+
+            let candidate = RevealTabScore(element: el, score: score)
+            if best == nil || candidate.score > best!.score { best = candidate }
+            return true
+        }
+
+        return best
+    }
+
+    private static func normalizeRevealTabTitle(_ label: String) -> String {
+        var s = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("Preview ") {
+            s = String(s.dropFirst("Preview ".count))
+        }
+        if let bullet = s.firstIndex(of: "•") {
+            s = String(s[..<bullet])
+        }
+        if let comma = s.firstIndex(of: ",") {
+            s = String(s[..<comma])
+        }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func scoreForRevealTabLabel(_ label: String, targetName: String) -> Int {
+        if label == targetName { return 120 }
+        if label.hasSuffix("/" + targetName) { return 100 }
+        if label.contains(targetName) { return 80 }
+        return 0
     }
 
     private static func fileishTabKeys(window: AXUIElement, maxNodes: Int) -> Set<String> {
