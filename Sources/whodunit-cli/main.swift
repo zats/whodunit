@@ -5,6 +5,7 @@ private struct OutputLine: Encodable {
     struct App: Encodable {
         let pid: String
         let name: String
+        let bundleID: String
     }
 
     let app: App
@@ -34,7 +35,7 @@ encoder.outputFormatting = []
 if jsonl {
     for app in resolver.apps {
         let line = OutputLine(
-            app: .init(pid: String(app.pid), name: app.name),
+            app: .init(pid: String(app.pid), name: app.name, bundleID: app.bundleID),
             isFrontmost: app.isFrontmost,
             hasTabs: app.hasTabs,
             isFileTabVisible: app.isTabDisplayingFileVisible
