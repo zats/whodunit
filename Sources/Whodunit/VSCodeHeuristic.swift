@@ -24,6 +24,14 @@ enum VSCodeHeuristic {
                     evaluate(app: app, target: target)
                 }
             ),
+            .init(
+                name: "VSCodeHeuristic",
+                match: .bundleID("com.todesktop.230313mzl4w4u92"), // Cursor
+                priority: 40,
+                run: { app, target in
+                    evaluate(app: app, target: target)
+                }
+            ),
         ]
     }
 
@@ -248,6 +256,8 @@ enum VSCodeHeuristic {
             roots = ["Code", "Code - Insiders", "Code - Exploration"]
         } else if bundleID == "com.visualstudio.code.oss" {
             roots = ["Code - OSS"]
+        } else if bundleID == "com.todesktop.230313mzl4w4u92" {
+            roots = ["Cursor"]
         } else {
             roots = ["Code"]
         }
